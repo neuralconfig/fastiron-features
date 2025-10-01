@@ -224,16 +224,16 @@ def extract_features_from_pdf(pdf_path):
 def main():
     """Main extraction process"""
     # Find all feature support matrix PDFs
-    release_notes_dir = Path("release-notes")
+    feature_matrix_dir = Path("feature-matrix")
 
-    if not release_notes_dir.exists():
-        print("Error: release-notes directory not found")
+    if not feature_matrix_dir.exists():
+        print("Error: feature-matrix directory not found")
         return
 
     # Find PDFs with or without " (1)" suffix
     pdf_files = []
     for pattern in ["fastiron-*-featuresupportmatrix.pdf", "fastiron-*-featuresupportmatrix*.pdf"]:
-        pdf_files.extend(release_notes_dir.glob(pattern))
+        pdf_files.extend(feature_matrix_dir.glob(pattern))
 
     # Remove duplicates and sort
     pdf_files = sorted(list(set(pdf_files)))
