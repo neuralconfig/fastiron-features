@@ -301,9 +301,7 @@
         <div class="tabs">
             <button class="tab-button active" data-tab="search">Feature Lookup</button>
             <button class="tab-button" data-tab="compare">Version Compare</button>
-            <button class="tab-button" data-tab="bugs">Bug Tracker</button>
-            <button class="tab-button" data-tab="releases">Release Notes</button>
-            <button class="tab-button" data-tab="upgrade">Upgrade Path</button>
+            <button class="tab-button" data-tab="defects">Defect Tracker</button>
         </div>
 
         <!-- Feature Lookup Tab -->
@@ -353,89 +351,51 @@
             </div>
         </div>
 
-        <!-- Bug Tracker Tab -->
-        <div id="bugs-tab" class="tab-content">
+        <!-- Defect Tracker Tab -->
+        <div id="defects-tab" class="tab-content">
             <div class="search-box">
-                <input type="text" id="bug-search" placeholder="Search issues by ID, symptom, or technology...">
+                <input type="text" id="defect-search" placeholder="Search defects by FI number, symptom, or technology...">
             </div>
 
             <div class="compare-selectors" style="margin-bottom: 15px;">
                 <div>
-                    <label for="bug-status-filter">Status:</label>
-                    <select id="bug-status-filter">
+                    <label for="defect-status-filter">Status:</label>
+                    <select id="defect-status-filter">
                         <option value="all">All</option>
-                        <option value="closed">Fixed Issues</option>
+                        <option value="closed">Fixed</option>
                         <option value="known">Known Issues</option>
                     </select>
                 </div>
                 <div>
-                    <label for="bug-version-filter">Version:</label>
-                    <select id="bug-version-filter">
+                    <label for="defect-version-filter">Show defects in:</label>
+                    <select id="defect-version-filter">
                         <option value="all">All Versions</option>
                     </select>
                 </div>
             </div>
 
             <div class="results">
-                <div class="results-count" id="bug-results-count"></div>
-                <div id="bug-results"></div>
-            </div>
-        </div>
-
-        <!-- Release Notes Tab -->
-        <div id="releases-tab" class="tab-content">
-            <div>
-                <label for="release-version-select">Select Version:</label>
-                <select id="release-version-select">
-                    <option value="">Select a version...</option>
-                </select>
-            </div>
-
-            <div class="results" style="margin-top: 20px;">
-                <div id="release-details"></div>
-            </div>
-        </div>
-
-        <!-- Upgrade Path Tab -->
-        <div id="upgrade-tab" class="tab-content">
-            <div class="compare-selectors">
-                <div>
-                    <label for="upgrade-from">Current Version:</label>
-                    <select id="upgrade-from"></select>
-                </div>
-                <div>
-                    <label for="upgrade-to">Target Version:</label>
-                    <select id="upgrade-to"></select>
-                </div>
-            </div>
-
-            <button class="button" id="upgrade-analyze-button">Analyze Upgrade Path</button>
-
-            <div class="results">
-                <div class="results-count" id="upgrade-results-count"></div>
-                <div id="upgrade-results"></div>
+                <div class="results-count" id="defect-results-count"></div>
+                <div id="defect-results"></div>
             </div>
         </div>
     </div>
 
     <script>
         let featuresData = [];
-        let issuesData = [];
-        let releaseNotesData = [];
+        let defectsData = [];
         let currentPlatform = 'ICX7150';
 
         // Load all data files
         async function loadData() {
             try {
-                const [featuresResponse, issuesResponse, releaseResponse] = await Promise.all([
+                const [featuresResponse, defectsResponse] = await Promise.all([
                     fetch('features_data.json'),
-                    fetch('issues_data.json'),
-                    fetch('release_features_data.json')
+                    fetch('defects_data.json')
                 ]);
 
                 featuresData = await featuresResponse.json();
-                issuesData = await issuesResponse.json();
-                releaseNotesData = await releaseResponse.json();
+                defectsData = await defectsResponse.json();
 
                 initializeApp();
             } catch (error) {
@@ -479,31 +439,16 @@
                 versionTo.value = versions[versions.length - 1];
             }
 
-            // Populate bug tracker version filter
-            const bugVersionFilter = document.getElementById('bug-version-filter');
-            const issueVersions = [...new Set(issuesData.map(i => i.reported_version))].sort();
-            issueVersions.forEach(version => {
-                bugVersionFilter.add(new Option(version, version));
+            // Populate defect tracker version filter
+            const defectVersionFilter = document.getElementById('defect-version-filter');
+            const defectVersions = new Set();
+            defectsData.forEach(defect => {
+                Object.keys(defect.version_history).forEach(v => defectVersions.add(v));
             });
-
-            // Populate release notes dropdown
-            const releaseSelect = document.getElementById('release-version-select');
-            const releaseVersions = releaseNotesData.map(r => r.version).sort().reverse();
-            releaseVersions.forEach(version => {
-                releaseSelect.add(new Option(version, version));
+            const sortedDefectVersions = [...defectVersions].sort();
+            sortedDefectVersions.forEach(version => {
+                defectVersionFilter.add(new Option(version, version));
             });
-
-            // Populate upgrade path dropdowns
-            const upgradeFrom = document.getElementById('upgrade-from');
-            const upgradeTo = document.getElementById('upgrade-to');
-            issueVersions.forEach(version => {
-                upgradeFrom.add(new Option(version, version));
-                upgradeTo.add(new Option(version, version));
-            });
-            if (issueVersions.length >= 2) {
-                upgradeFrom.value = issueVersions[0];
-                upgradeTo.value = issueVersions[issueVersions.length - 1];
-            }
         }
 
         // Setup event listeners
@@ -528,16 +473,10 @@
             // Compare button
             document.getElementById('compare-button').addEventListener('click', performCompare);
 
-            // Bug tracker search and filters
-            document.getElementById('bug-search').addEventListener('input', performBugSearch);
-            document.getElementById('bug-status-filter').addEventListener('change', performBugSearch);
-            document.getElementById('bug-version-filter').addEventListener('change', performBugSearch);
-
-            // Release notes version selector
-            document.getElementById('release-version-select').addEventListener('change', displayReleaseNotes);
-
-            // Upgrade path analyzer
-            document.getElementById('upgrade-analyze-button').addEventListener('click', analyzeUpgradePath);
+            // Defect tracker search and filters
+            document.getElementById('defect-search').addEventListener('input', performDefectSearch);
+            document.getElementById('defect-status-filter').addEventListener('change', performDefectSearch);
+            document.getElementById('defect-version-filter').addEventListener('change', performDefectSearch);
         }
 
         // Switch tabs
@@ -787,249 +726,71 @@
             return div.innerHTML;
         }
 
-        // ===== BUG TRACKER FUNCTIONS =====
-        function performBugSearch() {
-            const searchTerm = document.getElementById('bug-search').value.toLowerCase();
-            const statusFilter = document.getElementById('bug-status-filter').value;
-            const versionFilter = document.getElementById('bug-version-filter').value;
-            const resultsDiv = document.getElementById('bug-results');
-            const countDiv = document.getElementById('bug-results-count');
+        // ===== DEFECT TRACKER FUNCTIONS =====
+        function performDefectSearch() {
+            const searchTerm = document.getElementById('defect-search').value.toLowerCase();
+            const statusFilter = document.getElementById('defect-status-filter').value;
+            const versionFilter = document.getElementById('defect-version-filter').value;
+            const resultsDiv = document.getElementById('defect-results');
+            const countDiv = document.getElementById('defect-results-count');
 
-            let filtered = issuesData.filter(issue => {
+            let filtered = defectsData.filter(defect => {
                 // Apply status filter
-                if (statusFilter !== 'all' && issue.status !== statusFilter) return false;
+                if (statusFilter !== 'all' && defect.current_status !== statusFilter) return false;
 
-                // Apply version filter
-                if (versionFilter !== 'all' && issue.reported_version !== versionFilter) return false;
+                // Apply version filter (show defects present in that version)
+                if (versionFilter !== 'all') {
+                    if (!defect.version_history[versionFilter]) return false;
+                }
 
                 // Apply search term (search in ID, symptom, technology)
                 if (searchTerm) {
-                    const searchText = `${issue.id} ${issue.symptom} ${issue.technology} ${issue.condition}`.toLowerCase();
+                    const searchText = `${defect.id} ${defect.symptom} ${defect.technology} ${defect.condition}`.toLowerCase();
                     if (!searchText.includes(searchTerm)) return false;
                 }
 
                 return true;
             });
 
-            countDiv.textContent = `Found ${filtered.length} issue${filtered.length !== 1 ? 's' : ''}`;
+            countDiv.textContent = `Found ${filtered.length} defect${filtered.length !== 1 ? 's' : ''}`;
 
             if (filtered.length === 0) {
-                resultsDiv.innerHTML = '<div class="no-results">No issues found matching your criteria</div>';
+                resultsDiv.innerHTML = '<div class="no-results">No defects found matching your criteria</div>';
                 return;
             }
 
-            let html = filtered.map(issue => `
-                <div class="feature-card">
-                    <div class="feature-name">
-                        <strong>${escapeHtml(issue.id)}</strong>
-                        <span class="version-badge ${issue.status === 'closed' ? 'badge-closed' : 'badge-known'}">${issue.status === 'closed' ? 'Fixed' : 'Known Issue'}</span>
-                    </div>
-                    <div class="feature-details">
-                        <p><strong>Symptom:</strong> ${escapeHtml(issue.symptom)}</p>
-                        ${issue.condition ? `<p><strong>Condition:</strong> ${escapeHtml(issue.condition)}</p>` : ''}
-                        ${issue.workaround && issue.workaround !== 'None' && issue.workaround !== 'NA' ? `<p><strong>Workaround:</strong> ${escapeHtml(issue.workaround)}</p>` : ''}
-                        ${issue.recovery && issue.recovery !== 'None' && issue.recovery !== 'NA' ? `<p><strong>Recovery:</strong> ${escapeHtml(issue.recovery)}</p>` : ''}
-                        ${issue.probability ? `<p><strong>Probability:</strong> ${escapeHtml(issue.probability)}</p>` : ''}
-                        ${issue.technology ? `<p><strong>Technology:</strong> ${escapeHtml(issue.technology)}</p>` : ''}
-                        ${issue.found_in && issue.found_in.length > 0 ? `<p><strong>Found In:</strong> ${issue.found_in.map(v => escapeHtml(v)).join(', ')}</p>` : ''}
-                        ${issue.fixed_in ? `<p><strong>Fixed In:</strong> ${escapeHtml(issue.fixed_in)}</p>` : ''}
-                    </div>
-                </div>
-            `).join('');
+            let html = filtered.map(defect => {
+                // Build version history timeline
+                const versions = Object.keys(defect.version_history).sort();
+                const versionBadges = versions.map(v => {
+                    const status = defect.version_history[v];
+                    const badgeClass = status === 'closed' ? 'badge-closed' : 'badge-known';
+                    const badgeText = status === 'closed' ? '✓' : '!';
+                    return `<span class="version-badge ${badgeClass}" style="margin: 2px;">${v} ${badgeText}</span>`;
+                }).join(' ');
 
-            resultsDiv.innerHTML = html;
-        }
-
-        // ===== RELEASE NOTES FUNCTIONS =====
-        function displayReleaseNotes() {
-            const version = document.getElementById('release-version-select').value;
-            const resultsDiv = document.getElementById('release-details');
-
-            if (!version) {
-                resultsDiv.innerHTML = '';
-                return;
-            }
-
-            const release = releaseNotesData.find(r => r.version === version);
-            if (!release) {
-                resultsDiv.innerHTML = '<div class="no-results">No release notes found for this version</div>';
-                return;
-            }
-
-            let html = `<h2 style="margin-bottom: 20px;">FastIron ${escapeHtml(version)} Release Notes</h2>`;
-
-            // Hardware section
-            if (release.hardware && release.hardware.length > 0) {
-                html += `
+                return `
                     <div class="feature-card">
-                        <div class="feature-name"><strong>New Hardware</strong></div>
-                        <div class="feature-details">
-                            <ul>${release.hardware.map(hw => `<li>${escapeHtml(hw)}</li>`).join('')}</ul>
-                        </div>
-                    </div>
-                `;
-            }
-
-            // Software features section
-            if (release.software_features && release.software_features.length > 0) {
-                html += `
-                    <div class="feature-card">
-                        <div class="feature-name"><strong>New Software Features</strong></div>
-                        <div class="feature-details">
-                            <ul>${release.software_features.map(feat => `<li>${escapeHtml(feat)}</li>`).join('')}</ul>
-                        </div>
-                    </div>
-                `;
-            }
-
-            // CLI Commands sections
-            if (release.cli_commands) {
-                if (release.cli_commands.new && release.cli_commands.new.length > 0) {
-                    html += `
-                        <div class="feature-card">
-                            <div class="feature-name"><strong>New CLI Commands</strong></div>
-                            <div class="feature-details">
-                                <ul>${release.cli_commands.new.map(cmd => `<li><code>${escapeHtml(cmd)}</code></li>`).join('')}</ul>
-                            </div>
-                        </div>
-                    `;
-                }
-
-                if (release.cli_commands.modified && release.cli_commands.modified.length > 0) {
-                    html += `
-                        <div class="feature-card">
-                            <div class="feature-name"><strong>Modified CLI Commands</strong></div>
-                            <div class="feature-details">
-                                <ul>${release.cli_commands.modified.map(cmd => `<li><code>${escapeHtml(cmd)}</code></li>`).join('')}</ul>
-                            </div>
-                        </div>
-                    `;
-                }
-
-                if (release.cli_commands.deprecated && release.cli_commands.deprecated.length > 0) {
-                    html += `
-                        <div class="feature-card">
-                            <div class="feature-name"><strong>Deprecated CLI Commands</strong></div>
-                            <div class="feature-details">
-                                <ul>${release.cli_commands.deprecated.map(cmd => `<li><code>${escapeHtml(cmd)}</code></li>`).join('')}</ul>
-                            </div>
-                        </div>
-                    `;
-                }
-            }
-
-            // RFCs and MIBs
-            if (release.rfcs && release.rfcs.length > 0) {
-                html += `
-                    <div class="feature-card">
-                        <div class="feature-name"><strong>New RFCs and Standards</strong></div>
-                        <div class="feature-details">
-                            <ul>${release.rfcs.map(rfc => `<li>${escapeHtml(rfc)}</li>`).join('')}</ul>
-                        </div>
-                    </div>
-                `;
-            }
-
-            if (release.mibs && release.mibs.length > 0) {
-                html += `
-                    <div class="feature-card">
-                        <div class="feature-name"><strong>New MIBs</strong></div>
-                        <div class="feature-details">
-                            <ul>${release.mibs.map(mib => `<li>${escapeHtml(mib)}</li>`).join('')}</ul>
-                        </div>
-                    </div>
-                `;
-            }
-
-            resultsDiv.innerHTML = html;
-        }
-
-        // ===== UPGRADE PATH ANALYZER FUNCTIONS =====
-        function analyzeUpgradePath() {
-            const fromVersion = document.getElementById('upgrade-from').value;
-            const toVersion = document.getElementById('upgrade-to').value;
-            const resultsDiv = document.getElementById('upgrade-results');
-            const countDiv = document.getElementById('upgrade-results-count');
-
-            if (!fromVersion || !toVersion) {
-                resultsDiv.innerHTML = '<div class="no-results">Please select both versions</div>';
-                return;
-            }
-
-            if (fromVersion === toVersion) {
-                resultsDiv.innerHTML = '<div class="no-results">Please select different versions</div>';
-                return;
-            }
-
-            // Find all issues fixed between these versions
-            const fixedIssues = issuesData.filter(issue => {
-                if (issue.status !== 'closed' || !issue.fixed_in) return false;
-
-                // Check if issue was found in or before fromVersion
-                const foundInFrom = issue.found_in.some(v => compareVersions(v, fromVersion) <= 0) ||
-                                   compareVersions(issue.reported_version, fromVersion) <= 0;
-
-                // Check if issue was fixed in or before toVersion (but after fromVersion)
-                const fixedInRange = compareVersions(issue.fixed_in, fromVersion) > 0 &&
-                                    compareVersions(issue.fixed_in, toVersion) <= 0;
-
-                return foundInFrom && fixedInRange;
-            });
-
-            // Find known issues in the target version
-            const knownIssues = issuesData.filter(issue => {
-                if (issue.status !== 'known') return false;
-                return compareVersions(issue.reported_version, toVersion) <= 0;
-            });
-
-            countDiv.innerHTML = `
-                Upgrading from <strong>${escapeHtml(fromVersion)}</strong> to <strong>${escapeHtml(toVersion)}</strong>:<br>
-                <strong>${fixedIssues.length}</strong> issues will be fixed, <strong>${knownIssues.length}</strong> known issues in target version
-            `;
-
-            let html = '';
-
-            // Fixed issues section
-            if (fixedIssues.length > 0) {
-                html += `<h3 style="margin: 20px 0 10px 0; color: #27ae60;">✓ Issues Fixed in This Upgrade</h3>`;
-                html += fixedIssues.map(issue => `
-                    <div class="feature-card" style="border-left: 3px solid #27ae60;">
                         <div class="feature-name">
-                            <strong>${escapeHtml(issue.id)}</strong>
-                            <span class="version-badge" style="background: #27ae60;">Fixed in ${escapeHtml(issue.fixed_in)}</span>
+                            <strong>${escapeHtml(defect.id)}</strong>
+                            <span class="version-badge ${defect.current_status === 'closed' ? 'badge-closed' : 'badge-known'}">
+                                ${defect.current_status === 'closed' ? 'Fixed' : 'Known Issue'}
+                            </span>
                         </div>
                         <div class="feature-details">
-                            <p><strong>Symptom:</strong> ${escapeHtml(issue.symptom)}</p>
-                            ${issue.technology ? `<p><strong>Technology:</strong> ${escapeHtml(issue.technology)}</p>` : ''}
+                            <p><strong>Symptom:</strong> ${escapeHtml(defect.symptom)}</p>
+                            ${defect.condition ? `<p><strong>Condition:</strong> ${escapeHtml(defect.condition)}</p>` : ''}
+                            ${defect.workaround && defect.workaround !== 'None' && defect.workaround !== 'NA' && defect.workaround !== 'Not known' ? `<p><strong>Workaround:</strong> ${escapeHtml(defect.workaround)}</p>` : ''}
+                            ${defect.recovery && defect.recovery !== 'None' && defect.recovery !== 'NA' && defect.recovery !== 'Not known' ? `<p><strong>Recovery:</strong> ${escapeHtml(defect.recovery)}</p>` : ''}
+                            ${defect.probability ? `<p><strong>Probability:</strong> ${escapeHtml(defect.probability)}</p>` : ''}
+                            ${defect.technology ? `<p><strong>Technology:</strong> ${escapeHtml(defect.technology)}</p>` : ''}
+                            <p><strong>Version History:</strong><br>${versionBadges}</p>
+                            ${defect.first_seen ? `<p><strong>First Seen:</strong> ${escapeHtml(defect.first_seen)}</p>` : ''}
+                            ${defect.fixed_in ? `<p><strong>Fixed In:</strong> ${escapeHtml(defect.fixed_in)}</p>` : ''}
                         </div>
                     </div>
-                `).join('');
-            }
-
-            // Known issues section (show top 20)
-            if (knownIssues.length > 0) {
-                html += `<h3 style="margin: 20px 0 10px 0; color: #e67e22;">⚠ Known Issues in Target Version (Top 20)</h3>`;
-                html += knownIssues.slice(0, 20).map(issue => `
-                    <div class="feature-card" style="border-left: 3px solid #e67e22;">
-                        <div class="feature-name">
-                            <strong>${escapeHtml(issue.id)}</strong>
-                            <span class="version-badge" style="background: #e67e22;">Known Issue</span>
-                        </div>
-                        <div class="feature-details">
-                            <p><strong>Symptom:</strong> ${escapeHtml(issue.symptom)}</p>
-                            ${issue.workaround && issue.workaround !== 'None' && issue.workaround !== 'NA' ? `<p><strong>Workaround:</strong> ${escapeHtml(issue.workaround)}</p>` : ''}
-                            ${issue.technology ? `<p><strong>Technology:</strong> ${escapeHtml(issue.technology)}</p>` : ''}
-                        </div>
-                    </div>
-                `).join('');
-                if (knownIssues.length > 20) {
-                    html += `<p style="text-align: center; margin: 10px 0; font-style: italic;">Showing top 20 of ${knownIssues.length} known issues. Use Bug Tracker tab to see all.</p>`;
-                }
-            }
-
-            if (fixedIssues.length === 0 && knownIssues.length === 0) {
-                html = '<div class="no-results">No issue data available for this upgrade path</div>';
-            }
+                `;
+            }).join('');
 
             resultsDiv.innerHTML = html;
         }

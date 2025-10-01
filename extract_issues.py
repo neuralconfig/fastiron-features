@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Extract bug fixes and known issues from FastIron release notes PDFs.
+Extract defects (bug fixes and known issues) from FastIron release notes PDFs using table extraction.
 """
 
 import pdfplumber
@@ -11,7 +11,6 @@ from collections import defaultdict
 
 def extract_version_from_filename(filename):
     """Extract version number from release notes filename like 'fastiron-08090mc-releasenotes-1.0.pdf'"""
-    # Match patterns like: 08090, 08091, 10020b_cd3, 08090mc, 08095pb1, etc.
     match = re.search(r'fastiron-([^-]+)-releasenotes', filename)
     if match:
         version_str = match.group(1)
@@ -27,7 +26,6 @@ def extract_version_from_filename(filename):
 
         # Remove any letter suffix (including multi-letter like "mc", "pb1")
         letter_suffix = ''
-        # Find where digits end
         digit_end = 0
         for i, c in enumerate(base_version):
             if c.isdigit():
@@ -57,14 +55,41 @@ def clean_text(text):
     if not text:
         return ""
     # Replace newlines with spaces, collapse multiple spaces
-    text = text.replace('\n', ' ').replace('\r', ' ')
+    text = str(text).replace('\n', ' ').replace('\r', ' ')
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
-def parse_issue_block(text, start_idx, issue_id):
-    """Parse a single issue block from text starting at start_idx"""
-    issue = {
-        'id': issue_id,
+def is_defect_table(table):
+    """Check if a table is a defect table (has Issue FI-XXXXXX structure)"""
+    if not table or len(table) < 7:  # Defect tables have at least 7 rows
+        return False
+
+    # First row should be ['Issue', 'FI-XXXXXX']
+    first_row = table[0]
+    if len(first_row) != 2:
+        return False
+
+    field_name = str(first_row[0]).strip() if first_row[0] else ""
+    field_value = str(first_row[1]).strip() if first_row[1] else ""
+
+    return field_name.lower() == 'issue' and re.match(r'FI-\d+', field_value)
+
+def extract_fi_number(table):
+    """Extract FI number from defect table"""
+    if table and len(table) > 0 and len(table[0]) >= 2:
+        fi_text = str(table[0][1]).strip()
+        match = re.match(r'(FI-\d+)', fi_text)
+        if match:
+            return match.group(1)
+    return None
+
+def parse_defect_table(table):
+    """Parse a defect table and extract all fields"""
+    if not is_defect_table(table):
+        return None
+
+    defect = {
+        'id': '',
         'symptom': '',
         'condition': '',
         'workaround': '',
@@ -74,145 +99,154 @@ def parse_issue_block(text, start_idx, issue_id):
         'technology': ''
     }
 
-    # Extract each field using regex patterns
-    # Symptom (required)
-    symptom_match = re.search(r'Symptom\s+(.+?)(?=Condition|Workaround|Recovery|Probability|Found In|Technology|Issue FI-|$)', text[start_idx:], re.DOTALL | re.IGNORECASE)
-    if symptom_match:
-        issue['symptom'] = clean_text(symptom_match.group(1))
+    # Extract FI number
+    defect['id'] = extract_fi_number(table)
+    if not defect['id']:
+        return None
 
-    # Condition
-    condition_match = re.search(r'Condition\s+(.+?)(?=Workaround|Recovery|Probability|Found In|Technology|Issue FI-|$)', text[start_idx:], re.DOTALL | re.IGNORECASE)
-    if condition_match:
-        issue['condition'] = clean_text(condition_match.group(1))
+    # Parse each row (field_name, field_value)
+    for row in table:
+        if len(row) < 2:
+            continue
 
-    # Workaround
-    workaround_match = re.search(r'Workaround\s+(.+?)(?=Recovery|Probability|Found In|Technology|Issue FI-|$)', text[start_idx:], re.DOTALL | re.IGNORECASE)
-    if workaround_match:
-        issue['workaround'] = clean_text(workaround_match.group(1))
+        field_name = str(row[0]).strip().lower() if row[0] else ""
+        field_value = str(row[1]).strip() if row[1] else ""
 
-    # Recovery
-    recovery_match = re.search(r'Recovery\s+(.+?)(?=Probability|Found In|Technology|Issue FI-|$)', text[start_idx:], re.DOTALL | re.IGNORECASE)
-    if recovery_match:
-        issue['recovery'] = clean_text(recovery_match.group(1))
+        if 'symptom' in field_name:
+            defect['symptom'] = clean_text(field_value)
+        elif 'condition' in field_name:
+            defect['condition'] = clean_text(field_value)
+        elif 'workaround' in field_name:
+            defect['workaround'] = clean_text(field_value)
+        elif 'recovery' in field_name:
+            defect['recovery'] = clean_text(field_value)
+        elif 'probability' in field_name:
+            defect['probability'] = clean_text(field_value)
+        elif 'found in' in field_name:
+            # Extract version numbers like "FI 10.0.20 FI 08.0.95"
+            versions = re.findall(r'FI\s*(\d+\.\d+\.\d+[a-z]*(?:_cd\d+)?)', field_value, re.IGNORECASE)
+            defect['found_in'] = versions
+        elif 'technology' in field_name:
+            defect['technology'] = clean_text(field_value)
 
-    # Probability
-    probability_match = re.search(r'Probability\s+(.+?)(?=Found In|Technology|Issue FI-|$)', text[start_idx:], re.DOTALL | re.IGNORECASE)
-    if probability_match:
-        issue['probability'] = clean_text(probability_match.group(1))
+    # Only return if we have at least a symptom
+    if defect['symptom']:
+        return defect
+    return None
 
-    # Found In (can have multiple versions)
-    found_in_match = re.search(r'Found In\s+(.+?)(?=Technology|Issue FI-|$)', text[start_idx:], re.DOTALL | re.IGNORECASE)
-    if found_in_match:
-        found_in_text = found_in_match.group(1)
-        # Extract version numbers like "FI 10.0.20", "FI 08.0.95"
-        versions = re.findall(r'FI\s*(\d+\.\d+\.\d+[a-z]*(?:_cd\d+)?)', found_in_text, re.IGNORECASE)
-        issue['found_in'] = versions
+def determine_section_status(page_text):
+    """Determine if current page is in 'closed' or 'known' issues section"""
+    # Look for section headers in page text
+    if re.search(r'Closed Issues.*with Code Changes', page_text, re.IGNORECASE):
+        return 'closed'
+    elif re.search(r'Known Issues', page_text, re.IGNORECASE):
+        return 'known'
+    return None
 
-    # Technology / Technology Group
-    tech_match = re.search(r'Technology\s*/\s*Technology\s+Group\s+(.+?)(?=Issue FI-|$)', text[start_idx:], re.DOTALL | re.IGNORECASE)
-    if tech_match:
-        issue['technology'] = clean_text(tech_match.group(1))
-
-    return issue
-
-def extract_issues_from_pdf(pdf_path):
-    """Extract all issues (closed and known) from a single release notes PDF"""
-    issues = []
+def extract_defects_from_pdf(pdf_path):
+    """Extract all defects from a single release notes PDF"""
+    defects_by_fi = {}  # Key by FI number
 
     print(f"Processing {pdf_path.name}...")
 
     version = extract_version_from_filename(pdf_path.name)
     if not version:
         print(f"  Warning: Could not extract version from filename")
-        return issues
+        return defects_by_fi
 
     print(f"  Version: {version}")
 
     with pdfplumber.open(pdf_path) as pdf:
-        full_text = ""
-        in_issues_section = False
+        current_status = None  # 'closed' or 'known'
 
-        # Extract all text from the PDF
         for page_num, page in enumerate(pdf.pages, 1):
-            text = page.extract_text()
-            if not text:
+            # Get page text to determine section
+            page_text = page.extract_text() or ""
+
+            # Update current section status based on headers
+            section_status = determine_section_status(page_text)
+            if section_status:
+                current_status = section_status
+
+            # Skip if not in an issues section
+            if not current_status:
                 continue
 
-            # Check if we've entered an issues section
-            if re.search(r'(Closed Issues|Known Issues|Issues)', text, re.IGNORECASE):
-                in_issues_section = True
+            # Extract tables from page
+            tables = page.extract_tables()
 
-            # Stop if we hit certain end markers
-            if re.search(r'(Limitations and Restrictions|Obtaining Technical Support)', text, re.IGNORECASE):
-                in_issues_section = False
+            for table in tables:
+                defect = parse_defect_table(table)
+                if not defect:
+                    continue
 
-            if in_issues_section:
-                full_text += text + "\n"
+                fi_num = defect['id']
 
-        if not full_text:
-            print(f"  No issues section found")
-            return issues
+                # If we haven't seen this FI number, add it
+                if fi_num not in defects_by_fi:
+                    defects_by_fi[fi_num] = defect
+                    defects_by_fi[fi_num]['version_history'] = {}
 
-        # Find all section headers to map issues to their status
-        section_headers = []
+                # Record this version and status
+                defects_by_fi[fi_num]['version_history'][version] = current_status
 
-        # Look for "Closed Issues with Code Changes" sections
-        for match in re.finditer(r'Closed Issues.*?(?:in|for).*?(?:Release|FastIron)\s+(\d+\.\d+\.\d+[a-z_cd\d]*)', full_text, re.IGNORECASE):
-            section_headers.append({
-                'start': match.start(),
-                'status': 'closed',
-                'version': match.group(1)
-            })
+    print(f"  Extracted {len(defects_by_fi)} unique defects")
+    return defects_by_fi
 
-        # Look for "Known Issues" sections
-        for match in re.finditer(r'Known Issues.*?(?:in|for).*?(?:Release|FastIron)\s+(\d+\.\d+\.\d+[a-z_cd\d]*)', full_text, re.IGNORECASE):
-            section_headers.append({
-                'start': match.start(),
-                'status': 'known',
-                'version': match.group(1)
-            })
+def merge_defects(all_defects_by_pdf):
+    """Merge defects from multiple PDFs, aggregating by FI number"""
+    merged = {}
 
-        # Sort by position
-        section_headers.sort(key=lambda x: x['start'])
+    for pdf_defects in all_defects_by_pdf:
+        for fi_num, defect in pdf_defects.items():
+            if fi_num not in merged:
+                # First time seeing this defect
+                merged[fi_num] = {
+                    'id': defect['id'],
+                    'symptom': defect['symptom'],
+                    'condition': defect['condition'],
+                    'workaround': defect['workaround'],
+                    'recovery': defect['recovery'],
+                    'probability': defect['probability'],
+                    'technology': defect['technology'],
+                    'found_in': defect.get('found_in', []),
+                    'version_history': defect['version_history'].copy()
+                }
+            else:
+                # Merge version history
+                merged[fi_num]['version_history'].update(defect['version_history'])
 
-        # Find all issue IDs (FI-XXXXXX)
-        issue_pattern = r'Issue\s+(FI-\d+)'
-        issue_matches = list(re.finditer(issue_pattern, full_text, re.IGNORECASE))
+                # Update fields if they were empty before (prefer non-empty data)
+                for field in ['symptom', 'condition', 'workaround', 'recovery', 'probability', 'technology']:
+                    if not merged[fi_num][field] and defect[field]:
+                        merged[fi_num][field] = defect[field]
 
-        print(f"  Found {len(issue_matches)} issues")
+                # Merge found_in versions
+                for v in defect.get('found_in', []):
+                    if v not in merged[fi_num]['found_in']:
+                        merged[fi_num]['found_in'].append(v)
 
-        # Parse each issue
-        for i, match in enumerate(issue_matches):
-            issue_id = match.group(1)
-            start_idx = match.start()
+    # Calculate first_seen and fixed_in for each defect
+    for fi_num, defect in merged.items():
+        versions = sorted(defect['version_history'].keys())
 
-            # Determine status based on which section this issue is in
-            current_status = 'unknown'
-            current_section_version = version
+        # First seen is earliest version
+        defect['first_seen'] = versions[0] if versions else None
 
-            for header in reversed(section_headers):
-                if start_idx > header['start']:
-                    current_status = header['status']
-                    current_section_version = header['version']
-                    break
+        # Fixed in is the first version where status is 'closed'
+        defect['fixed_in'] = None
+        for v in versions:
+            if defect['version_history'][v] == 'closed':
+                defect['fixed_in'] = v
+                break
 
-            # Parse the issue block
-            issue = parse_issue_block(full_text, start_idx, issue_id)
-            issue['status'] = current_status
-            issue['fixed_in'] = current_section_version if current_status == 'closed' else None
-            issue['reported_version'] = version
+        # Current status is status in the latest version
+        defect['current_status'] = defect['version_history'][versions[-1]] if versions else 'unknown'
 
-            # Only add if we have at least a symptom
-            if issue['symptom']:
-                issues.append(issue)
-
-        print(f"  Extracted {len(issues)} issues with data")
-
-    return issues
+    return merged
 
 def main():
     """Main extraction process"""
-    # Find all release notes PDFs (not feature support matrix)
     release_notes_dir = Path("release-notes")
 
     if not release_notes_dir.exists():
@@ -220,12 +254,7 @@ def main():
         return
 
     # Find release notes PDFs (exclude feature support matrix PDFs)
-    pdf_files = []
-    for pdf_file in release_notes_dir.glob("fastiron-*-releasenotes*.pdf"):
-        pdf_files.append(pdf_file)
-
-    # Remove duplicates and sort
-    pdf_files = sorted(list(set(pdf_files)))
+    pdf_files = sorted(release_notes_dir.glob("fastiron-*-releasenotes*.pdf"))
 
     if not pdf_files:
         print("Error: No release notes PDFs found")
@@ -233,44 +262,52 @@ def main():
 
     print(f"Found {len(pdf_files)} release notes PDF files to process\n")
 
-    all_issues = []
+    all_defects = []
 
     for pdf_file in pdf_files:
-        issues = extract_issues_from_pdf(pdf_file)
-        all_issues.extend(issues)
+        defects = extract_defects_from_pdf(pdf_file)
+        all_defects.append(defects)
+
+    # Merge defects from all PDFs
+    print("\nMerging defects from all versions...")
+    merged_defects = merge_defects(all_defects)
+
+    # Convert to list for JSON output (sorted by FI number)
+    defects_list = [merged_defects[fi] for fi in sorted(merged_defects.keys())]
 
     # Save to JSON
-    output_file = Path("issues_data.json")
+    output_file = Path("defects_data.json")
     with open(output_file, 'w') as f:
-        json.dump(all_issues, f, indent=2)
+        json.dump(defects_list, f, indent=2)
 
     print(f"\nExtraction complete!")
-    print(f"Total issues extracted: {len(all_issues)}")
+    print(f"Total unique defects: {len(merged_defects)}")
     print(f"Output saved to: {output_file}")
 
-    # Print some statistics
-    statuses = defaultdict(int)
-    technologies = defaultdict(int)
-    versions_with_issues = set()
-
-    for issue in all_issues:
-        statuses[issue['status']] += 1
-        if issue['technology']:
-            technologies[issue['technology']] += 1
-        if issue['fixed_in']:
-            versions_with_issues.add(issue['fixed_in'])
-        versions_with_issues.add(issue['reported_version'])
+    # Print statistics
+    closed_count = sum(1 for d in defects_list if d['current_status'] == 'closed')
+    known_count = sum(1 for d in defects_list if d['current_status'] == 'known')
 
     print(f"\nStatistics:")
-    print(f"  Closed issues: {statuses.get('closed', 0)}")
-    print(f"  Known issues: {statuses.get('known', 0)}")
-    print(f"  Versions covered: {sorted(versions_with_issues)}")
-    print(f"  Unique technology groups: {len(technologies)}")
+    print(f"  Currently fixed: {closed_count}")
+    print(f"  Currently known issues: {known_count}")
 
-    if technologies:
-        print(f"\nTop 5 technology groups:")
-        for tech, count in sorted(technologies.items(), key=lambda x: x[1], reverse=True)[:5]:
+    # Count defects by technology
+    tech_counts = defaultdict(int)
+    for defect in defects_list:
+        if defect['technology']:
+            tech_counts[defect['technology']] += 1
+
+    if tech_counts:
+        print(f"\nTop 10 technology groups:")
+        for tech, count in sorted(tech_counts.items(), key=lambda x: x[1], reverse=True)[:10]:
             print(f"    {tech}: {count}")
+
+    # Show version coverage
+    all_versions = set()
+    for defect in defects_list:
+        all_versions.update(defect['version_history'].keys())
+    print(f"\nVersions covered: {sorted(all_versions)}")
 
 if __name__ == "__main__":
     main()
