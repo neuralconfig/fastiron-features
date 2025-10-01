@@ -1,0 +1,31 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Claude workspace
+.claude/
+
+# PDF source files (not needed for website)
+release-notes/
+
+# Development
+feature-matrix/
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
