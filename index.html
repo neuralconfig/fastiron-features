@@ -450,7 +450,7 @@
                 });
             });
 
-            const versions = [...versionSet].sort();
+            const versions = [...versionSet].sort(compareVersions);
             const versionFrom = document.getElementById('version-from');
             const versionTo = document.getElementById('version-to');
 
@@ -471,10 +471,12 @@
             defectsData.forEach(defect => {
                 Object.keys(defect.version_history).forEach(v => defectVersions.add(v));
             });
-            const sortedDefectVersions = [...defectVersions].sort();
+            const sortedDefectVersions = [...defectVersions].sort(compareVersions);
+            console.log(`Populating defect version filter with ${sortedDefectVersions.length} versions`);
             sortedDefectVersions.forEach(version => {
                 defectVersionFilter.add(new Option(version, version));
             });
+            console.log(`Defect version filter now has ${defectVersionFilter.options.length} options`);
         }
 
         // Setup event listeners
