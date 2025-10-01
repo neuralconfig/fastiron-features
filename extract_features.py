@@ -13,9 +13,12 @@ def extract_version_from_filename(filename):
     match = re.search(r'fastiron-(\d+)-', filename)
     if match:
         version_str = match.group(1)
-        # Convert 08090 to 08.0.90
+        # Convert 08090 to 8.0.90 (remove leading zero)
         if len(version_str) == 5:
-            return f"{version_str[:2]}.{version_str[2]}.{version_str[3:]}"
+            major = str(int(version_str[:2]))  # Remove leading zero
+            minor = version_str[2]
+            patch = version_str[3:5]
+            return f"{major}.{minor}.{patch}"
     return None
 
 def normalize_platform_name(platform_str):
