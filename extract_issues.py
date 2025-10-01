@@ -6,8 +6,10 @@ Extract defects (bug fixes and known issues) from FastIron release notes PDFs us
 import pdfplumber
 import json
 import re
+import sys
 from pathlib import Path
 from collections import defaultdict
+from datetime import datetime
 
 def extract_version_from_filename(filename):
     """Extract version number from release notes filename like 'fastiron-08090mc-releasenotes-1.0.pdf'"""
@@ -37,7 +39,7 @@ def extract_version_from_filename(filename):
             letter_suffix = base_version[digit_end:]
             base_version = base_version[:digit_end]
 
-        # Convert 08090 to 08.0.90 or 10020 to 10.0.20
+        # Convert 08090 to 8.0.90 or 10020 to 10.0.20
         if len(base_version) >= 5 and base_version.isdigit():
             major = str(int(base_version[:2]))  # Remove leading zero
             minor = base_version[2]
@@ -147,17 +149,18 @@ def extract_defects_from_pdf(pdf_path):
     """Extract all defects from a single release notes PDF"""
     defects_by_fi = {}  # Key by FI number
 
-    print(f"Processing {pdf_path.name}...")
+    print(f"  Processing {pdf_path.name}...", flush=True)
 
     version = extract_version_from_filename(pdf_path.name)
     if not version:
-        print(f"  Warning: Could not extract version from filename")
+        print(f"  ⚠ Warning: Could not extract version from filename", flush=True)
         return defects_by_fi
 
-    print(f"  Version: {version}")
+    print(f"  Version: {version}", flush=True)
 
     with pdfplumber.open(pdf_path) as pdf:
         current_status = None  # 'closed' or 'known'
+        pages_with_defects = 0
 
         for page_num, page in enumerate(pdf.pages, 1):
             # Get page text to determine section
@@ -168,8 +171,8 @@ def extract_defects_from_pdf(pdf_path):
             if section_status:
                 current_status = section_status
 
-            # Skip if not in an issues section
-            if not current_status:
+            # Skip if not in an issues section and page doesn't have FI numbers
+            if not current_status and 'FI-' not in page_text:
                 continue
 
             # Extract tables from page
@@ -181,16 +184,18 @@ def extract_defects_from_pdf(pdf_path):
                     continue
 
                 fi_num = defect['id']
+                pages_with_defects += 1
 
                 # If we haven't seen this FI number, add it
                 if fi_num not in defects_by_fi:
                     defects_by_fi[fi_num] = defect
                     defects_by_fi[fi_num]['version_history'] = {}
 
-                # Record this version and status
-                defects_by_fi[fi_num]['version_history'][version] = current_status
+                # Record this version and status (use current_status or 'known' as default)
+                status = current_status if current_status else 'known'
+                defects_by_fi[fi_num]['version_history'][version] = status
 
-    print(f"  Extracted {len(defects_by_fi)} unique defects")
+    print(f"  ✓ Extracted {len(defects_by_fi)} unique defects from {pages_with_defects} tables", flush=True)
     return defects_by_fi
 
 def merge_defects(all_defects_by_pdf):
@@ -247,6 +252,13 @@ def merge_defects(all_defects_by_pdf):
 
 def main():
     """Main extraction process"""
+    start_time = datetime.now()
+    print(f"\n{'='*80}")
+    print(f"FastIron Defect Extraction")
+    print(f"Started: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"{'='*80}\n")
+    sys.stdout.flush()
+
     release_notes_dir = Path("release-notes")
 
     if not release_notes_dir.exists():
@@ -260,37 +272,58 @@ def main():
         print("Error: No release notes PDFs found")
         return
 
-    print(f"Found {len(pdf_files)} release notes PDF files to process\n")
+    print(f"Found {len(pdf_files)} release notes PDF files to process\n", flush=True)
 
     all_defects = []
 
-    for pdf_file in pdf_files:
+    for idx, pdf_file in enumerate(pdf_files, 1):
+        elapsed = (datetime.now() - start_time).total_seconds()
+        avg_time = elapsed / idx if idx > 0 else 0
+        remaining = avg_time * (len(pdf_files) - idx)
+
+        print(f"\n[{idx}/{len(pdf_files)}] ({idx/len(pdf_files)*100:.1f}%) - Elapsed: {int(elapsed)}s - ETA: {int(remaining)}s", flush=True)
         defects = extract_defects_from_pdf(pdf_file)
         all_defects.append(defects)
 
     # Merge defects from all PDFs
-    print("\nMerging defects from all versions...")
+    print("\n" + "="*80, flush=True)
+    print("Merging defects from all versions...", flush=True)
     merged_defects = merge_defects(all_defects)
+
+    # Verify uniqueness
+    print(f"Verifying FI number uniqueness...", flush=True)
+    fi_numbers = list(merged_defects.keys())
+    if len(fi_numbers) == len(set(fi_numbers)):
+        print(f"✓ All {len(fi_numbers)} FI numbers are unique", flush=True)
+    else:
+        print(f"✗ WARNING: Duplicate FI numbers detected!", flush=True)
 
     # Convert to list for JSON output (sorted by FI number)
     defects_list = [merged_defects[fi] for fi in sorted(merged_defects.keys())]
 
     # Save to JSON
     output_file = Path("defects_data.json")
+    print(f"Writing output to {output_file}...", flush=True)
     with open(output_file, 'w') as f:
         json.dump(defects_list, f, indent=2)
 
-    print(f"\nExtraction complete!")
-    print(f"Total unique defects: {len(merged_defects)}")
-    print(f"Output saved to: {output_file}")
+    end_time = datetime.now()
+    total_time = (end_time - start_time).total_seconds()
+
+    print(f"\n" + "="*80, flush=True)
+    print(f"EXTRACTION COMPLETE", flush=True)
+    print("="*80, flush=True)
+    print(f"Total unique defects: {len(merged_defects)}", flush=True)
+    print(f"Output saved to: {output_file}", flush=True)
+    print(f"Total time: {int(total_time)}s ({total_time/60:.1f} minutes)", flush=True)
 
     # Print statistics
     closed_count = sum(1 for d in defects_list if d['current_status'] == 'closed')
     known_count = sum(1 for d in defects_list if d['current_status'] == 'known')
 
-    print(f"\nStatistics:")
-    print(f"  Currently fixed: {closed_count}")
-    print(f"  Currently known issues: {known_count}")
+    print(f"\nDefect Status:", flush=True)
+    print(f"  Currently fixed (closed): {closed_count}", flush=True)
+    print(f"  Currently known issues: {known_count}", flush=True)
 
     # Count defects by technology
     tech_counts = defaultdict(int)
@@ -299,15 +332,30 @@ def main():
             tech_counts[defect['technology']] += 1
 
     if tech_counts:
-        print(f"\nTop 10 technology groups:")
+        print(f"\nTop 10 technology groups:", flush=True)
         for tech, count in sorted(tech_counts.items(), key=lambda x: x[1], reverse=True)[:10]:
-            print(f"    {tech}: {count}")
+            print(f"  {tech}: {count}", flush=True)
 
     # Show version coverage
     all_versions = set()
     for defect in defects_list:
         all_versions.update(defect['version_history'].keys())
-    print(f"\nVersions covered: {sorted(all_versions)}")
+
+    print(f"\nVersion Coverage:", flush=True)
+    print(f"  Total versions: {len(all_versions)}", flush=True)
+    print(f"  Versions: {', '.join(sorted(all_versions)[:10])}", flush=True)
+    if len(all_versions) > 10:
+        print(f"  ... and {len(all_versions) - 10} more", flush=True)
+
+    # Show sample records
+    print(f"\nSample defect records:", flush=True)
+    for i, defect in enumerate(defects_list[:3], 1):
+        print(f"\n  {i}. {defect['id']}:", flush=True)
+        print(f"     Symptom: {defect['symptom'][:80]}...", flush=True)
+        print(f"     Versions tracked: {len(defect['version_history'])}", flush=True)
+        print(f"     First seen: {defect['first_seen']}", flush=True)
+        print(f"     Fixed in: {defect['fixed_in'] or 'Not fixed'}", flush=True)
+        print(f"     Current status: {defect['current_status']}", flush=True)
 
 if __name__ == "__main__":
     main()

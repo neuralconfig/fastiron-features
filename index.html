@@ -273,6 +273,28 @@
         .changed {
             background: #fff3cd;
         }
+
+        .disclaimer {
+            background: #fff3cd;
+            border-left: 4px solid #e67e22;
+            padding: 15px 20px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            font-size: 14px;
+            color: #666;
+            line-height: 1.5;
+        }
+
+        .disclaimer a {
+            color: #e67e22;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .disclaimer a:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
@@ -281,6 +303,10 @@
     </header>
 
     <div class="container">
+        <!-- Disclaimer Notice -->
+        <div class="disclaimer">
+            <strong>⚠️ Beta Preview:</strong> This tool is currently under development and should be used for reference purposes only. For authoritative information, please consult the <a href="https://support.ruckuswireless.com" target="_blank">official RUCKUS support documentation</a>.
+        </div>
         <!-- Platform Selector (Always Visible) -->
         <div class="platform-selector">
             <label for="platform-select">Platform:</label>
